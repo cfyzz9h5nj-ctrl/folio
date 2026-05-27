@@ -6,6 +6,7 @@ import { computeHoldings } from '@/lib/calculations'
 import { usePrices } from '@/hooks/usePrices'
 import { fmtCurrency, fmtPct, generateId } from '@/lib/utils'
 import { MetricCard } from '@/components/dashboard/MetricCard'
+import { AlertsPanel } from '@/components/dashboard/AlertsPanel'
 import { PortfolioChart } from '@/components/dashboard/PortfolioChart'
 import { DashboardPositionsTable } from '@/components/dashboard/PositionsTable'
 import type { Holding, Cash, Contribution } from '@/lib/types'
@@ -100,6 +101,9 @@ export default function DashboardPage() {
           trend={realPnl === null ? 'neutral' : realPnl >= 0 ? 'positive' : 'negative'}
         />
       </div>
+
+      {/* Alerts panel — only renders when there are active alerts */}
+      <AlertsPanel />
 
       {/* Pie chart — full width */}
       <PortfolioChart holdings={computed} />

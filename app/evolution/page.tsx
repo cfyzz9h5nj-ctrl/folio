@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { storage } from '@/lib/storage'
-import { totalPortfolioValue } from '@/lib/calculations'
 import { usePrices } from '@/hooks/usePrices'
+import { useSPYCandles, findSPYClose } from '@/hooks/useSPYCandles'
 import { fmtCurrency, fmtPct } from '@/lib/utils'
 import { MetricCard } from '@/components/dashboard/MetricCard'
 import { EvolutionChart } from '@/components/evolution/EvolutionChart'
@@ -40,9 +40,44 @@ export default function EvolutionPage() {
   // Contributed = sum of portfolio_contributions amounts
   const totalContributed = contributions.reduce((s, c) => s + c.amount, 0)
 
-  const pnl = totalValue - totalContributed
+  const pnl    = totalValue - totalContributed
   const pnlPct = totalContributed > 0 ? (pnl / totalContributed) * 100 : 0
 
+  // ─── SPY benchmark ────────────────────────────────────────────────────────
+  // Start date = first snapshot in history (null if none yet)
+  const spyFromDate = mounted && history.length > 0 ? history[0].date : null
+  const { candles: spyCandles } = useSPYCandles(spyFromDate)
+
+  // Initial capital invested at the time of the first snapshot
+  // (use first snapshot's contributed, fall back to current totalContributed)
+  const spyInitialCapital = history.length > 0
+    ? (history[0].contributed || totalContributed)
+    : totalContributed
+
+  // SPY close price at the start date (first available candle on or after start)
+  const spyStart = spyCandles.length > 0 ? spyCandles[0].close : null
+  // SPY close price today (last available candle)
+  const spyNow   = spyCandles.length > 0 ? spyCandles[spyCandles.length - 1].close : null
+
+  // For each snapshot, compute what spyInitialCapital would be worth in SPY
+  const spyValues = useMemo<(number | null)[]>(() => {
+    if (!spyStart || spyCandles.length === 0) return history.map(() => null)
+    return history.map((h) => {
+      const close = findSPYClose(spyCandles, h.date)
+      if (!close) return null
+      return (close / spyStart) * spyInitialCapital
+    })
+  }, [history, spyCandles, spyStart, spyInitialCapital])
+
+  // vs SPY percentage: my return% minus SPY return%
+  const spyReturnPct = (spyStart && spyNow)
+    ? ((spyNow - spyStart) / spyStart) * 100
+    : null
+  const vsSpyPct = (spyReturnPct !== null && totalContributed > 0)
+    ? pnlPct - spyReturnPct
+    : null
+
+  // ─── Snapshot handlers ────────────────────────────────────────────────────
   const saveSnapshot = (entry: CapitalHistory) => {
     const updated = [...history, entry].sort((a, b) => a.date.localeCompare(b.date))
     setHistory(updated)
@@ -67,7 +102,7 @@ export default function EvolutionPage() {
       </div>
 
       {/* Metric cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard
           title="Capital aportado"
           value={fmtCurrency(totalContributed)}
@@ -84,10 +119,28 @@ export default function EvolutionPage() {
           sub={totalContributed > 0 ? fmtPct(pnlPct) : undefined}
           trend={pnl >= 0 ? 'positive' : 'negative'}
         />
+        <MetricCard
+          title="vs SPY"
+          value={
+            vsSpyPct !== null
+              ? `${vsSpyPct >= 0 ? '+' : ''}${vsSpyPct.toFixed(1)}% vs SPY`
+              : '—'
+          }
+          sub={
+            spyReturnPct !== null
+              ? `SPY: ${spyReturnPct >= 0 ? '+' : ''}${spyReturnPct.toFixed(1)}%`
+              : undefined
+          }
+          trend={vsSpyPct === null ? 'neutral' : vsSpyPct >= 0 ? 'positive' : 'negative'}
+        />
       </div>
 
       {/* Chart — dotted line tracks portfolio_contributions total */}
-      <EvolutionChart history={history} baseline={totalContributed} />
+      <EvolutionChart
+        history={history}
+        baseline={totalContributed}
+        spyValues={spyValues}
+      />
 
       {/* History table */}
       <HistoryTable history={history} onDelete={deleteSnapshot} />
