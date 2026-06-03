@@ -8,8 +8,9 @@ export interface SPYCandle {
 }
 
 /**
- * Fetches daily SPY candles from Finnhub for the period starting at `fromDate`
- * until today. Returns an array sorted ascending by date.
+ * Fetches daily SPY candles via the internal Next.js proxy route
+ * (/api/spy-candles), which fetches from Yahoo Finance server-side
+ * to avoid browser CORS restrictions. No API key required.
  *
  * Returns empty array (and loading=false) when `fromDate` is null.
  */
@@ -20,31 +21,20 @@ export function useSPYCandles(fromDate: string | null) {
   useEffect(() => {
     if (!fromDate) return
 
-    const apiKey = process.env.NEXT_PUBLIC_FINNHUB_KEY
-    if (!apiKey) return
-
     let cancelled = false
     setLoading(true)
 
-    // Finnhub expects Unix seconds
     const fromTs = Math.floor(new Date(fromDate + 'T00:00:00Z').getTime() / 1000)
-    const toTs = Math.floor(Date.now() / 1000)
+    const toTs   = Math.floor(Date.now() / 1000)
 
-    fetch(
-      `https://finnhub.io/api/v1/stock/candle?symbol=SPY&resolution=D&from=${fromTs}&to=${toTs}&token=${apiKey}`,
-    )
-      .then((r) => r.json())
-      .then((data) => {
+    fetch(`/api/spy-candles?from=${fromTs}&to=${toTs}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then((data: { candles?: SPYCandle[] }) => {
         if (cancelled) return
-        if (data.s !== 'ok' || !Array.isArray(data.t)) {
-          setCandles([])
-          return
-        }
-        const result: SPYCandle[] = (data.t as number[]).map((ts, i) => ({
-          date: new Date(ts * 1000).toISOString().slice(0, 10),
-          close: (data.c as number[])[i],
-        }))
-        setCandles(result)
+        setCandles(data.candles ?? [])
       })
       .catch(() => {
         if (!cancelled) setCandles([])
